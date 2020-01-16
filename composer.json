@@ -13,6 +13,8 @@
         "doctrine redis orm bundle"
     ],
     "require": {
+        "doctrine/collections": "^1.6",
+        "doctrine/skeleton-mapper": "^1.0",
         "predis/predis": "^1.1"
     },
     "require-dev": {

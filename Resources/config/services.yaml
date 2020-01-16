@@ -1,1 +1,10 @@
+parameters:
+
+
 services:
+    redis_orm.entity_manager:
+        class: Goksagun\RedisOrmBundle\ORM\ModelManager
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Goksagun\RedisOrmBundle\ORM\ModelManagerInterface: '@redis_orm.entity_manager'
