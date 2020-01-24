@@ -6,6 +6,7 @@ use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\SkeletonMapper\DataRepository\BasicObjectDataRepository;
 use Doctrine\SkeletonMapper\Mapping\ClassMetadataInterface;
 use Doctrine\SkeletonMapper\ObjectManagerInterface;
+use Goksagun\RedisOrmBundle\Utils\StringHelper;
 use Predis\Client;
 
 class RedisObjectDataRepository extends BasicObjectDataRepository
@@ -19,13 +20,17 @@ class RedisObjectDataRepository extends BasicObjectDataRepository
     /** @var ClassMetadataInterface */
     protected $class;
 
-    public function __construct(ObjectManagerInterface $objectManager, ArrayCollection $objects, string $className)
-    {
+    public function __construct(
+        ObjectManagerInterface $objectManager,
+        Client $client,
+        ArrayCollection $objects,
+        string $className
+    ) {
         parent::__construct($objectManager, $className);
 
         // inject some other dependencies to the class
+        $this->client = $client;
         $this->objects = $objects;
-        $this->client = new Client();
     }
 
     /**
@@ -33,15 +38,7 @@ class RedisObjectDataRepository extends BasicObjectDataRepository
      */
     public function findAll(): array
     {
-        $class = $this->getClassMetadata();
-        $keyspace = strtolower($class->getName());
-
-        $objectsData = [];
-        foreach ($this->client->hgetall($keyspace) as $objectData) {
-            $objectsData[] = unserialize($objectData);
-        }
-
-        return $objectsData;
+        throw new \RuntimeException(sprintf('This %s method not support', __METHOD__));
     }
 
     /**
@@ -57,17 +54,23 @@ class RedisObjectDataRepository extends BasicObjectDataRepository
         ?int $offset = null
     ): array {
         $class = $this->getClassMetadata();
-        $keyspace = strtolower($class->getName());
+        $keyspace = StringHelper::slug($class->getName());
         $identifierValues = $criteria;
 
         $keys = [];
         foreach ($identifierValues as $identifierValue) {
-            $keys[] = $identifierValue['id'];
+            $keys[] = $this->generateKey($keyspace, $identifierValue['id']);
         }
 
         $objectsData = [];
-        foreach ($this->client->hmget($keyspace, $keys) as $objectData) {
-            $objectsData[] = unserialize($objectData);
+        foreach ($keys as $key) {
+            if ($this->objects->containsKey($key)) {
+                $objectsData[] = $this->objects->get($key);
+
+                continue;
+            }
+
+            $this->objects[$key] = $objectsData[] = $this->client->hgetall($key);
         }
 
         return $objectsData;
@@ -81,26 +84,35 @@ class RedisObjectDataRepository extends BasicObjectDataRepository
     public function findOneBy(array $criteria): ?array
     {
         $class = $this->getClassMetadata();
-        $keyspace = strtolower($class->getName());
+        $keyspace = StringHelper::slug($class->getName());
         $identifierValue = $criteria;
+        $id = $identifierValue['id'];
+        $key = $this->generateKey($keyspace, $id);
 
-        $key = $identifierValue['id'];
-
-        $objectData = $this->client->hget($keyspace, $key);
+        if ($this->objects->containsKey($key)) {
+            $objectData = $this->objects->get($key);
+        } else {
+            $this->objects[$key] = $objectData = $this->client->hgetall($key);
+        }
 
         if (!$objectData) {
             return null;
         }
 
-        return unserialize($objectData);
+        return $objectData;
     }
 
-    public function getClassMetadata() : ClassMetadataInterface
+    public function getClassMetadata(): ClassMetadataInterface
     {
         if ($this->class === null) {
             $this->class = $this->objectManager->getClassMetadata($this->className);
         }
 
         return $this->class;
+    }
+
+    private function generateKey($keyspace, $identifier): string
+    {
+        return $keyspace.':'.$identifier;
     }
 }

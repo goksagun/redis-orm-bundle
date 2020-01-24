@@ -2,6 +2,7 @@
 
 namespace Goksagun\RedisOrmBundle\DependencyInjection;
 
+use Goksagun\RedisOrmBundle\ORM\ModelManager;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader;
@@ -24,5 +25,27 @@ class RedisOrmExtension extends Extension
 
         $loader = new Loader\YamlFileLoader($container, new FileLocator(__DIR__.'/../Resources/config'));
         $loader->load('services.yaml');
+
+        $modelMangerDefinition = $container->getDefinition('redis_orm.model_manager');
+        $modelMangerDefinition->setArgument('$config', $config['model_managers']['default'] ?? ['paths' => $config['paths']]);
+
+        $shardManagerDefinition = $container->getDefinition('redis_orm.shard_manager');
+        $shardManagerDefinition->setArgument('$config', $config['shards']);
+
+        if (!$container->has('redis_orm.default.model_manager')) {
+            $container
+                ->register('redis_orm.default.model_manager', ModelManager::class)
+                ->addArgument('$config', ['paths' => $config['paths']])
+                ->setPublic(true)
+            ;
+        }
+
+        foreach ($config['model_managers'] as $name => $argument) {
+            $container
+                ->register("redis_orm.{$name}.model_manager", ModelManager::class)
+                ->setArgument('$config', $argument)
+                ->setPublic(true)
+            ;
+        }
     }
 }

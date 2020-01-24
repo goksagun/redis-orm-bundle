@@ -11,6 +11,7 @@ use Doctrine\SkeletonMapper\Mapping\LoadMetadataInterface;
 use Doctrine\SkeletonMapper\ObjectManagerInterface;
 use Doctrine\SkeletonMapper\Persister\IdentifiableInterface;
 use Doctrine\SkeletonMapper\Persister\PersistableInterface;
+use Doctrine\SkeletonMapper\UnitOfWork\Change;
 use Doctrine\SkeletonMapper\UnitOfWork\ChangeSet;
 
 abstract class Model implements HydratableInterface, IdentifiableInterface, LoadMetadataInterface, NotifyPropertyChanged, PersistableInterface
@@ -20,14 +21,19 @@ abstract class Model implements HydratableInterface, IdentifiableInterface, Load
     public const MANY_TO_ONE_RELATION = 'many-to-one';
     public const MANY_TO_MANY_RELATION = 'many-to-many';
 
+    public const EXCLUDE_FROM_MAPPING = ['listeners', 'relations', 'ttl'];
+
     /** @var int */
     protected $id;
 
-    /** @var PropertyChangedListener[] */
-    private $listeners = [];
+    /** @var int */
+    protected $ttl;
 
     /** @var array */
     protected $relations = [];
+
+    /** @var PropertyChangedListener[] */
+    private $listeners = [];
 
     public function getId(): ?int
     {
@@ -39,6 +45,18 @@ abstract class Model implements HydratableInterface, IdentifiableInterface, Load
         $this->onPropertyChanged('id', $this->id, $id);
 
         $this->id = $id;
+
+        return $this;
+    }
+
+    public function getTtl(): ?int
+    {
+        return $this->ttl;
+    }
+
+    public function setTtl(int $ttl): self
+    {
+        $this->ttl = $ttl;
 
         return $this;
     }
@@ -69,7 +87,7 @@ abstract class Model implements HydratableInterface, IdentifiableInterface, Load
         $metadata->setIdentifierFieldNames(['id']);
 
         foreach (get_class_vars(self::class) as $classVar) {
-            if ('listeners' === $classVar || 'relations' === $classVar) {
+            if (static::isExcludedForMapping($classVar)) {
                 continue;
             }
 
@@ -102,7 +120,7 @@ abstract class Model implements HydratableInterface, IdentifiableInterface, Load
                                 function ($val) {
                                     return ['id' => $val];
                                 },
-                                $value
+                                explode(',', $value)
                             );
 
                             $value = new ArrayCollection($objectManager->getRepository($class)->findBy($values));
@@ -148,7 +166,37 @@ abstract class Model implements HydratableInterface, IdentifiableInterface, Load
      */
     public function prepareUpdateChangeSet(ChangeSet $changeSet): array
     {
-        $changeSet = $this->prepareChangeSet($changeSet);
+        $changeSet = array_map(
+            function (Change $change) {
+                $propName = $change->getPropertyName();
+                $propValue = $change->getNewValue();
+
+                if ($relation = $this->relations[$propName] ?? null) {
+                    $type = $relation['type'];
+
+                    $changeSet = [];
+                    switch ($type) {
+                        case static::ONE_TO_MANY_RELATION:
+                            if (is_object($propValue)) {
+                                foreach ($propValue as $item) {
+                                    $changeSet[] = $item->getId();
+                                }
+                            }
+                            break;
+                        default:
+                            if (is_object($propValue)) {
+                                $changeSet = $propValue->getId();
+                            }
+                            break;
+                    }
+
+                    return $changeSet;
+                }
+
+                return $change->getNewValue();
+            },
+            $changeSet->getChanges()
+        );
 
         $changeSet['id'] = $this->id;
 
@@ -172,7 +220,7 @@ abstract class Model implements HydratableInterface, IdentifiableInterface, Load
         $changeSet = [];
         foreach ($objectVars = $reflectionClass->getProperties() as $property) {
             $propName = $property->getName();
-            if ('listeners' === $propName || 'relations' === $propName || 'id' === $propName) {
+            if ($this->isExcludedForMapping($propName)) {
                 continue;
             }
 
@@ -186,14 +234,14 @@ abstract class Model implements HydratableInterface, IdentifiableInterface, Load
                 switch ($type) {
                     case static::ONE_TO_MANY_RELATION:
                         $changeSet[$propName] = [];
-                        if (is_object($propValue)) {
+                        if ($propValue instanceof Model) {
                             foreach ($propValue as $item) {
                                 $changeSet[$propName][] = $item->getId();
                             }
                         }
                         break;
                     default:
-                        if (is_object($propValue)) {
+                        if ($propValue instanceof Model) {
                             $changeSet[$propName] = $propValue->getId();
                         }
                         break;
@@ -206,5 +254,10 @@ abstract class Model implements HydratableInterface, IdentifiableInterface, Load
         }
 
         return $changeSet;
+    }
+
+    private static function isExcludedForMapping(string $propName): bool
+    {
+        return in_array($propName, static::EXCLUDE_FROM_MAPPING);
     }
 }

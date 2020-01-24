@@ -16,16 +16,18 @@ use Doctrine\SkeletonMapper\ObjectRepository\BasicObjectRepository;
 use Doctrine\SkeletonMapper\ObjectRepository\ObjectRepositoryFactory;
 use Doctrine\SkeletonMapper\Persister\ObjectPersisterFactory;
 use Doctrine\SkeletonMapper\UnitOfWork;
+use Goksagun\RedisOrmBundle\ORM\Model\Model;
 use Goksagun\RedisOrmBundle\ORM\Persister\RedisObjectPersister;
 use Goksagun\RedisOrmBundle\ORM\Repository\RedisObjectDataRepository;
-use Goksagun\RedisOrmBundle\ORM\Utility\Helper;
+use Goksagun\RedisOrmBundle\Utils\FileHelper;
+use Predis\Client;
 use Symfony\Component\Finder\Finder;
 
 class ModelManager implements ModelManagerInterface
 {
     private $objectManager;
 
-    public function __construct(string $projectDir)
+    public function __construct(array $config = [])
     {
         $eventManager = new EventManager();
         $classMetadataFactory = new ClassMetadataFactory(new ClassMetadataInstantiator());
@@ -34,6 +36,11 @@ class ModelManager implements ModelManagerInterface
         $objectPersisterFactory = new ObjectPersisterFactory();
         $objectIdentityMap = new ObjectIdentityMap($objectRepositoryFactory);
 
+        $configuration = new Configuration(
+            $config['host'] ?? '127.0.0.1:6379',
+            $config['paths'],
+            $config['options'] ?? []
+        );
         $objectManager = new ObjectManager(
             $objectRepositoryFactory,
             $objectPersisterFactory,
@@ -42,9 +49,11 @@ class ModelManager implements ModelManagerInterface
             $eventManager
         );
 
-        $models = (new Finder())->files()->in($projectDir.'/src/Model');
+        $models = (new Finder())->files()->in(
+            $configuration->getPaths()
+        ); //"paths" => "/Users/burak/Code/Php/symfony_libs/src/Model"
         foreach ($models->getIterator() as $fileInfo) {
-            $className = Helper::getClassFromFile($fileInfo->getRealPath());
+            $className = FileHelper::getClassFromFile($fileInfo->getRealPath());
 
             $reflectionClass = new \ReflectionClass($className);
 
@@ -55,7 +64,7 @@ class ModelManager implements ModelManagerInterface
             foreach ($reflectionClass->getProperties() as $property) {
                 $propertyName = $property->getName();
 
-                if ('listeners' === $propertyName) {
+                if (in_array($propertyName, Model::EXCLUDE_FROM_MAPPING)) {
                     continue;
                 }
 
@@ -64,8 +73,10 @@ class ModelManager implements ModelManagerInterface
 
             $classMetadataFactory->setMetadataFor($className, $classMetadata);
 
-            $dataRepository = new RedisObjectDataRepository($objectManager, new ArrayCollection(), $className);
-            $persister = new RedisObjectPersister($objectManager, new ArrayCollection(), $className);
+            // TODO: make a factory creator for client
+            $client = new Client((string)$configuration->getHosts(), $configuration->getOptions());
+            $dataRepository = new RedisObjectDataRepository($objectManager, $client, new ArrayCollection(), $className);
+            $persister = new RedisObjectPersister($objectManager, $client, new ArrayCollection(), $className);
 
             $hydrator = new BasicObjectHydrator($objectManager);
             $repository = new BasicObjectRepository(

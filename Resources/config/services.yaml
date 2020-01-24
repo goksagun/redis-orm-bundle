@@ -2,9 +2,12 @@ parameters:
 
 
 services:
-    redis_orm.entity_manager:
+    redis_orm.model_manager:
         class: Goksagun\RedisOrmBundle\ORM\ModelManager
-        arguments:
-            $projectDir: '%kernel.project_dir%'
 
-    Goksagun\RedisOrmBundle\ORM\ModelManagerInterface: '@redis_orm.entity_manager'
+    Goksagun\RedisOrmBundle\ORM\ModelManagerInterface: '@redis_orm.model_manager'
+
+    redis_orm.shard_manager:
+        class: Goksagun\RedisOrmBundle\ORM\ShardManager
+
+    Goksagun\RedisOrmBundle\ORM\ShardManagerInterface: '@redis_orm.shard_manager'

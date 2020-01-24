@@ -1,8 +1,8 @@
 <?php
 
-namespace Goksagun\RedisOrmBundle\ORM\Utility;
+namespace Goksagun\RedisOrmBundle\Utils;
 
-final class Helper
+final class FileHelper
 {
     public static function getClassFromFile($path)
     {

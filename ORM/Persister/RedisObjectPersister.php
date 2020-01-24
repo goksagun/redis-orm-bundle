@@ -6,6 +6,8 @@ use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\SkeletonMapper\ObjectManagerInterface;
 use Doctrine\SkeletonMapper\Persister\BasicObjectPersister;
 use Doctrine\SkeletonMapper\UnitOfWork\ChangeSet;
+use Goksagun\RedisOrmBundle\ORM\Model\Model;
+use Goksagun\RedisOrmBundle\Utils\StringHelper;
 use Predis\Client;
 
 class RedisObjectPersister extends BasicObjectPersister
@@ -16,17 +18,21 @@ class RedisObjectPersister extends BasicObjectPersister
     /** @var Client $client */
     private $client;
 
-    public function __construct(ObjectManagerInterface $objectManager, ArrayCollection $objects, string $className)
-    {
+    public function __construct(
+        ObjectManagerInterface $objectManager,
+        Client $client,
+        ArrayCollection $objects,
+        string $className
+    ) {
         parent::__construct($objectManager, $className);
 
         // inject some other dependencies to the class
+        $this->client = $client;
         $this->objects = $objects;
-        $this->client = new Client();
     }
 
     /**
-     * @param object $object
+     * @param object|Model $object
      *
      * @return mixed[]
      */
@@ -34,55 +40,79 @@ class RedisObjectPersister extends BasicObjectPersister
     {
         $data = $this->preparePersistChangeSet($object);
 
-        $class = $this->getClassMetadata();
-
-        $keyspace = strtolower($class->getName());
-        $identifierValues = $class->getIdentifierValues($object);
-        $field = $identifierValues['id'];
+        $key = $this->generateKey($object);
 
         // write the $data
-        $this->client->hset($keyspace, $field, serialize($data));
+        $data = array_map(
+            function ($item) {
+                if (is_array($item) && empty($item)) {
+                    return null;
+                }
+                if (is_array($item)) {
+                    return implode(',', $item);
+                }
+
+                return $item;
+            },
+            $data
+        );
+        $this->client->hmset($key, $data);
+        if ($ttl = $object->getTtl()) {
+            $this->client->expire($key, $ttl);
+        }
 
         return $data;
     }
 
     /**
-     * @param object $object
+     * @param object|Model $object
      *
      * @return mixed[]
      */
     public function updateObject($object, ChangeSet $changeSet): array
     {
-        $changeSet = $this->prepareUpdateChangeSet($object, $changeSet);
+        $objectData = $this->prepareUpdateChangeSet($object, $changeSet);
 
-        $class = $this->getClassMetadata();
-        $keyspace = strtolower($class->getName());
-        $identifierValues = $class->getIdentifierValues($object);
-        $field = $identifierValues['id'];
-
-        $objectData = [];
-
-        foreach ($changeSet as $key => $value) {
-            $objectData[$key] = $value;
-        }
+        $key = $this->generateKey($object);
 
         // update the $objectData
-        $this->client->hset($keyspace, $field, serialize($objectData));
+        $objectData = array_map(
+            function ($item) {
+                if (is_array($item) && empty($item)) {
+                    return null;
+                }
+                if (is_array($item)) {
+                    return implode(',', $item);
+                }
+
+                return $item;
+            },
+            $objectData
+        );
+        $this->client->hmset($key, $objectData);
 
         return $objectData;
     }
 
     /**
-     * @param object $object
+     * @param object|Model $object
      */
     public function removeObject($object): void
     {
-        $class = $this->getClassMetadata();
-        $keyspace = strtolower($class->getName());
-        $identifierValues = $class->getIdentifierValues($object);
-        $field = $identifierValues['id'];
+        $key = $this->generateKey($object);
 
         // remove the object
-        $this->client->hdel($keyspace, (array)$field);
+        $this->client->del((array)$key);
+    }
+
+    private function generateKey($object): string
+    {
+        $class = $this->getClassMetadata();
+        $keyspace = StringHelper::slug($class->getName());
+        $identifierValues = $class->getIdentifierValues($object);
+        $id = $identifierValues['id'];
+        $key = $keyspace.':'.$id;
+
+        return $key;
     }
 }
