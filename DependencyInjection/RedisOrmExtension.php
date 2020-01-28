@@ -30,7 +30,7 @@ class RedisOrmExtension extends Extension
         $modelMangerDefinition->setArgument('$config', $config['model_managers']['default'] ?? ['paths' => $config['paths']]);
 
         $shardManagerDefinition = $container->getDefinition('redis_orm.shard_manager');
-        $shardManagerDefinition->setArgument('$config', $config['shards']);
+        $shardManagerDefinition->setArgument('$config', $config['shards'] ?? ['paths' => $config['paths']]);
 
         if (!$container->has('redis_orm.default.model_manager')) {
             $container

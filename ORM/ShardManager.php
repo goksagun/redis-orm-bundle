@@ -10,13 +10,13 @@ class ShardManager implements ShardManagerInterface
 
     public function __construct(array $config = [])
     {
-        $config = new Configuration($config['hosts'], $config['paths'], $config['options']);
+        $configuration = new Configuration($config['host'] ?? '127.0.0.1:6379', $config['paths'], $config['options'] ?? []);
 
         $this->modelManagers = new ArrayCollection();
 
-        foreach ((array)$config->getHosts() as $host) {
+        foreach ((array)$configuration->getHosts() as $host) {
             $this->modelManagers[] = new ModelManager(
-                ['host' => $host, 'options' => $config->getOptions(), 'paths' => $config->getPaths()]
+                ['host' => $host, 'options' => $configuration->getOptions(), 'paths' => $configuration->getPaths()]
             );
         }
     }
